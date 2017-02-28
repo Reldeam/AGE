@@ -1,0 +1,6 @@
+{
+  "name" : "phong",
+  "vertex" : "phong.vert",
+  "fragment" : "phong.frag",
+  "attributes" : ["vertices", "colours", "uvs"]
+}
