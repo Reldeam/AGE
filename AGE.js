@@ -82,11 +82,6 @@ var AGE = AGE || (function()
         return(matchesLoaded / matchesTotal);
     };
 
-    ResourceManager.onAllResourcesLoaded = function()
-    {
-        console.log(this);
-    };
-
     //////////////////////////////////////////////////////////////////////////////////
 
     function Resource(src)
@@ -369,6 +364,10 @@ var AGE = AGE || (function()
         return matrix;
     };
 
+    Matrix.model = Matrix.createIdentity(4);
+    Matrix.view = Matrix.createIdentity(4);
+    Matrix.projection = Matrix.createIdentity(4);
+
     function MatrixException(message)
     {
         this.name = "MatrixException";
@@ -418,6 +417,95 @@ var AGE = AGE || (function()
         this.children = [];
     }
 
+    Object3D.prototype.addChild = function(object3D)
+    {
+        if(typeof object3D === "undefined") return;
+        this.children.push(object3D);
+    };
+
+    Object3D.prototype.removeChild = function(object3D)
+    {
+        for(var i = 0; i < this.children.length; i++) {
+            if(this.children[i] === object3D) {
+                this.children.splice(i, 1);
+                break;
+            }
+        }
+    };
+
+    Object3D.prototype.translate = function(x, y, z)
+    {
+        var t = Matrix.createIdentity(4);
+
+        t[3] = x;
+        t[7] = y;
+        t[11] = z;
+
+        this.x += x;
+        this.y += y;
+        this.z += z;
+
+        this.matrix = Matrix.multiply(t, this.matrix);
+    };
+
+    Object3D.prototype.translation = function(x, y, z)
+    {
+        this.matrix[3] = x;
+        this.matrix[7] = y;
+        this.matrix[11] = z;
+    };
+
+    Object3D.prototype.scale = function(x, y, z)
+    {
+        var s = Matrix.createIdentity(4);
+
+        s[0] = x;
+        s[5] = y;
+        s[10] = z;
+
+        this.xScale *= x;
+        this.yScale *= y;
+        this.zScale *= z;
+
+        this.matrix = Matrix.multiply(s, this.matrix);
+    };
+
+    /**
+     * Rotates by angle degrees around the vector made by [x, y, z].
+     * https://en.wikipedia.org/wiki/Rotation_matrix
+     *
+     * @param angle {number}
+     * @param x {number}
+     * @param y {number}
+     * @param z {number}
+     */
+    Object3D.prototype.rotate = function(angle, x, y, z)
+    {
+        //Set to radians.
+        angle *= Math.PI / 180;
+
+        var uMagnitude = Math.sqrt(x*x + y*y + z*z);
+        var ux = x / uMagnitude;
+        var uy = y / uMagnitude;
+        var uz = z / uMagnitude;
+
+        var r = Matrix.createIdentity(4);
+
+        r[0] = Math.cos(angle) + Math.pow(ux, 2) * (1 - Math.cos(angle));
+        r[1] = ux * uy * (1 - Math.cos(angle)) - uz * Math.sin(angle);
+        r[2] = ux * uz * (1 - Math.cos(angle)) + uy * Math.sin(angle);
+
+        r[4] = ux * uy * (1 - Math.cos(angle)) + uz * Math.sin(angle);
+        r[5] = Math.cos(angle) + Math.pow(uy, 2) * (1 - Math.cos(angle));
+        r[6] = uy * uz * (1 - Math.cos(angle)) - ux * Math.sin(angle);
+
+        r[8] = ux * uz * (1 - Math.cos(angle)) - uy * Math.sin(angle);
+        r[9] = uy * uz * (1 - Math.cos(angle)) + ux * Math.sin(angle);
+        r[10] = Math.cos(angle) + Math.pow(uz, 2) * (1 - Math.cos(angle));
+
+        this.matrix = Matrix.multiply(r, this.matrix);
+    };
+
     Object3D.prototype.render = function() {};
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -428,6 +516,14 @@ var AGE = AGE || (function()
     function Scene()
     {
         Object3D.call(this);
+        this.camera = new Camera();
+        this.addChild(this.camera);
+
+        this.modelMatrix = Matrix.createIdentity(4);
+        this.projectionMatrix = Matrix.createIdentity(4);
+
+        this.camera.rotate(45, 1, 1, 0);
+        this.camera.translate(0, 0, 5);
     }
 
     Scene.prototype.render = function()
@@ -439,12 +535,45 @@ var AGE = AGE || (function()
         }
     };
 
-    Scene.prototype.addModel = function(model)
+    Scene.prototype.perspective = function(fieldOfView, aspectRatio, near, far)
     {
-        this.children.push(model);
+        //Change to radians.
+        fieldOfView *= Math.PI / 180;
+
+        var height = Math.tan(fieldOfView / 2) * (2 * near);
+        var width = height * aspectRatio;
+
+        var left = -width / 2;
+        var right = width / 2;
+        var bottom = -height / 2;
+        var top = height / 2;
+
+        this.frustum(left, right, bottom, top, near, far)
     };
 
-    Scene.prototype.removeModel = function(model) {};
+    Scene.prototype.frustum = function(left, right, bottom, top, near, far)
+    {
+        this.projectionMatrix = Matrix.createZeros(4);
+        this.projectionMatrix[0] = 2 * near / (right - left);
+        this.projectionMatrix[2] = (right + left) / (right - left);
+        this.projectionMatrix[5] = 2 * near / (top - bottom);
+        this.projectionMatrix[6] = (top + bottom) / (top - bottom);
+        this.projectionMatrix[10] = -(far + near) / (far - near);
+        this.projectionMatrix[11] = -2 * far * near / (far - near);
+        this.projectionMatrix[14] = -1;
+    };
+
+    Scene.prototype.orthographic = function(left, right, bottom, top, near, far)
+    {
+        this.projectionMatrix = Matrix.createZeros(4);
+        this.projectionMatrix[0] = 2 / (right - left);
+        this.projectionMatrix[3] = -((right + left) / (right - left));
+        this.projectionMatrix[5] = 2 / (top - bottom);
+        this.projectionMatrix[7] = -((top + bottom) / (top - bottom));
+        this.projectionMatrix[10] = -2 / (far - near);
+        this.projectionMatrix[11] = -((far + near) / (far - near));
+        this.projectionMatrix[15] = 1;
+    };
 
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -456,6 +585,31 @@ var AGE = AGE || (function()
     {
         Object3D.call(this);
     }
+
+    Camera.prototype.translate = function(x, y, z)
+    {
+        x *= -1;
+        y *= -1;
+        z *= -1;
+
+        Object3D.prototype.translate.call(this, x, y, z);
+    };
+
+    Camera.prototype.translation = function(x, y, z)
+    {
+        x *= -1;
+        y *= -1;
+        z *= -1;
+
+        Object3D.prototype.translation.call(this, x, y, z);
+    };
+
+    Camera.prototype.rotate = function(angle, x, y, z)
+    {
+        angle *= -1;
+
+        Object3D.prototype.rotate.call(this, angle, x, y, z);
+    };
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -503,7 +657,6 @@ var AGE = AGE || (function()
     {
         var mesh = this;
 
-        this.resource.load();
         this.resource.onLoad = function()
         {
             var data = mesh.resource.getJSON();
@@ -530,6 +683,8 @@ var AGE = AGE || (function()
             if(typeof mesh.onLoad === "function") mesh.onLoad();
             if(typeof callback === "function") callback();
         };
+
+        this.resource.load();
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -545,12 +700,24 @@ var AGE = AGE || (function()
 
     Mesh.prototype.render = function()
     {
+        var uniform = gl.getUniformLocation(getShaderProgram(), "modelMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.model));
+
+        uniform = gl.getUniformLocation(getShaderProgram(), "viewMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.view));
+
+        uniform = gl.getUniformLocation(getShaderProgram(), "projectionMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.projection));
+
         for(var i = 0; i < this.data.attributes.length; i++) {
             var attribute = this.data.attributes[i];
             var attributeLocation = gl.getAttribLocation(getShaderProgram(), attribute.name);
+            gl.enableVertexAttribArray(attributeLocation);
             gl.bindBuffer(gl.ARRAY_BUFFER, attribute.buffer);
             gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);
         }
+
+        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -846,6 +1013,10 @@ var AGE = AGE || (function()
         setScene : function(scene)
         {
             frame.scene = scene;
+            Matrix.projection = scene.projectionMatrix;
+            Matrix.model = scene.modelMatrix;
+            Matrix.view = scene.camera.matrix;
+
             return true;
         },
 
