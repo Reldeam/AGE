@@ -22,11 +22,15 @@
         var mesh = model.addMesh("cube");
 
         var scene = AGE.newScene();
+        scene.perspective(45, canvas.width/canvas.height, 0.1, 100);
         AGE.setScene(scene);
 
-        scene.addModel(model);
+        scene.addChild(model);
 
-        console.log(scene);
+        setTimeout(function()
+        {
+            scene.render();
+        }, 100);
 
 
     </script>

@@ -1,14 +1,152 @@
 var AGE = AGE || (function()
 {
     var gl = null;
+    var db = null;
     var frame = null;
 
     var meshes = {};
     var textures = {};
 
     var shaderPrograms = {};
+    var currentShaderProgram = null;
     var programsLoading = 0;
     var onProgramsLoaded = null;
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    var ResourceManager = {
+        resources : [],
+        resourcesLoaded : 0,
+        resourcesTotal : 0,
+        onResourceLoaded : null,
+        onAllResourcesLoaded : null
+    };
+
+    ResourceManager.newResource = function(src)
+    {
+        var rm = this;
+        var resource = new Resource(src);
+
+        this.resources.push(resource);
+        this.resourcesTotal++;
+
+        return resource;
+    };
+
+    ResourceManager.removeResource = function(resource)
+    {
+        for(var i = 0; i < this.resources.length; i++) {
+            if(resource === this.resources[i]) {
+                if(resource.loaded) this.resourcesLoaded--;
+                this.resourcesTotal--;
+                this.resources.splice(i, 1);
+                break;
+            }
+        }
+    };
+
+    ResourceManager.resourceLoaded = function()
+    {
+        this.resourcesLoaded++;
+        if(typeof this.onResourceLoaded === "function") this.onResourceLoaded();
+        if(this.resourcesLoaded == this.resourcesTotal && typeof this.onAllResourcesLoaded === "function")
+            this.onAllResourcesLoaded();
+    };
+
+    ResourceManager.load = function()
+    {
+        for(var i = 0; i < this.resources.length; i++) {
+            if(!this.resources[i].loaded && !this.resources[i].loading)
+                this.resources[i].load();
+        }
+    };
+
+    ResourceManager.getProgress = function(match)
+    {
+        if(typeof match === "undefined") {
+            if(this.resourcesTotal == 0) return 0;
+            return(this.resourcesLoaded / this.resourcesTotal);
+        }
+
+        var matchesLoaded = 0;
+        var matchesTotal = 0;
+
+        for(var i = 0; i < this.resources.length; i++) {
+            if(this.resources[i].src.match(/match$/).length > 0) {
+                matchesTotal++;
+                if(this.resources[i].loaded == true) matchesLoaded++;
+            }
+        }
+
+        if(matchesTotal == 0) return 0;
+        return(matchesLoaded / matchesTotal);
+    };
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    function Resource(src)
+    {
+        var resource = this;
+
+        this.src = src;
+        this.loaded = false;
+        this.loading = false;
+        this.bytesLoaded = 0;
+        this.bytesTotal = 0;
+        this.onLoad = null;
+        this.onProgress = null;
+
+        this.request = new XMLHttpRequest();
+
+        this.request.onreadystatechange = function(event)
+        {
+            switch(this.readyState) {
+                case 4:
+                    switch(this.status) {
+                        case 200:
+
+                            resource.loaded = true;
+                            resource.loading = false;
+                            ResourceManager.resourceLoaded();
+                            if(typeof resource.onLoad === "function") resource.onLoad();
+                            break;
+                    }
+                    break;
+            }
+        };
+
+        this.request.onprogress = function(event)
+        {
+            resource.bytesLoaded = event.loaded;
+            resource.bytesTotal = event.total;
+            if(typeof resource.onProgress === "function") resource.onProgress();
+        };
+    }
+
+    Resource.prototype.load = function()
+    {
+        this.loading = true;
+        this.request.open("GET", this.src);
+        this.request.send();
+    };
+
+    Resource.prototype.getProgress = function()
+    {
+        if(bytesTotal == 0) return(0);
+        return(bytesLoaded / bytesTotal);
+    };
+
+    Resource.prototype.getJSON = function()
+    {
+        if(this.loaded) return JSON.parse(this.request.responseText);
+        return null;
+    };
+
+    Resource.prototype.getFile = function()
+    {
+        if(this.loaded) return this.request.responseText;
+        return "";
+    };
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -226,6 +364,10 @@ var AGE = AGE || (function()
         return matrix;
     };
 
+    Matrix.model = Matrix.createIdentity(4);
+    Matrix.view = Matrix.createIdentity(4);
+    Matrix.projection = Matrix.createIdentity(4);
+
     function MatrixException(message)
     {
         this.name = "MatrixException";
@@ -234,8 +376,9 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function Attribute(type, size, data)
+    function Attribute(name, type, size, data)
     {
+        this.name = name;
         this.size = size;
 
         switch(type) {
@@ -274,6 +417,97 @@ var AGE = AGE || (function()
         this.children = [];
     }
 
+    Object3D.prototype.addChild = function(object3D)
+    {
+        if(typeof object3D === "undefined") return;
+        this.children.push(object3D);
+    };
+
+    Object3D.prototype.removeChild = function(object3D)
+    {
+        for(var i = 0; i < this.children.length; i++) {
+            if(this.children[i] === object3D) {
+                this.children.splice(i, 1);
+                break;
+            }
+        }
+    };
+
+    Object3D.prototype.translate = function(x, y, z)
+    {
+        var t = Matrix.createIdentity(4);
+
+        t[3] = x;
+        t[7] = y;
+        t[11] = z;
+
+        this.x += x;
+        this.y += y;
+        this.z += z;
+
+        this.matrix = Matrix.multiply(t, this.matrix);
+    };
+
+    Object3D.prototype.translation = function(x, y, z)
+    {
+        this.matrix[3] = x;
+        this.matrix[7] = y;
+        this.matrix[11] = z;
+    };
+
+    Object3D.prototype.scale = function(x, y, z)
+    {
+        var s = Matrix.createIdentity(4);
+
+        s[0] = x;
+        s[5] = y;
+        s[10] = z;
+
+        this.xScale *= x;
+        this.yScale *= y;
+        this.zScale *= z;
+
+        this.matrix = Matrix.multiply(s, this.matrix);
+    };
+
+    /**
+     * Rotates by angle degrees around the vector made by [x, y, z].
+     * https://en.wikipedia.org/wiki/Rotation_matrix
+     *
+     * @param angle {number}
+     * @param x {number}
+     * @param y {number}
+     * @param z {number}
+     */
+    Object3D.prototype.rotate = function(angle, x, y, z)
+    {
+        //Set to radians.
+        angle *= Math.PI / 180;
+
+        var uMagnitude = Math.sqrt(x*x + y*y + z*z);
+        var ux = x / uMagnitude;
+        var uy = y / uMagnitude;
+        var uz = z / uMagnitude;
+
+        var r = Matrix.createIdentity(4);
+
+        r[0] = Math.cos(angle) + Math.pow(ux, 2) * (1 - Math.cos(angle));
+        r[1] = ux * uy * (1 - Math.cos(angle)) - uz * Math.sin(angle);
+        r[2] = ux * uz * (1 - Math.cos(angle)) + uy * Math.sin(angle);
+
+        r[4] = ux * uy * (1 - Math.cos(angle)) + uz * Math.sin(angle);
+        r[5] = Math.cos(angle) + Math.pow(uy, 2) * (1 - Math.cos(angle));
+        r[6] = uy * uz * (1 - Math.cos(angle)) - ux * Math.sin(angle);
+
+        r[8] = ux * uz * (1 - Math.cos(angle)) - uy * Math.sin(angle);
+        r[9] = uy * uz * (1 - Math.cos(angle)) + ux * Math.sin(angle);
+        r[10] = Math.cos(angle) + Math.pow(uz, 2) * (1 - Math.cos(angle));
+
+        this.matrix = Matrix.multiply(r, this.matrix);
+    };
+
+    Object3D.prototype.render = function() {};
+
     //////////////////////////////////////////////////////////////////////////////////
 
     Scene.prototype = new Object3D();
@@ -282,14 +516,64 @@ var AGE = AGE || (function()
     function Scene()
     {
         Object3D.call(this);
+        this.camera = new Camera();
+        this.addChild(this.camera);
+
+        this.modelMatrix = Matrix.createIdentity(4);
+        this.projectionMatrix = Matrix.createIdentity(4);
+
+        this.camera.rotate(45, 1, 1, 0);
+        this.camera.translate(0, 0, 5);
     }
 
-    Scene.prototype.addModel = function(model)
+    Scene.prototype.render = function()
     {
-        this.children.push(model);
+        setShaderProgram("phong");
+
+        for(var i = 0; i < this.children.length; i++) {
+            this.children[i].render();
+        }
     };
 
-    Scene.prototype.removeModel = function(model) {};
+    Scene.prototype.perspective = function(fieldOfView, aspectRatio, near, far)
+    {
+        //Change to radians.
+        fieldOfView *= Math.PI / 180;
+
+        var height = Math.tan(fieldOfView / 2) * (2 * near);
+        var width = height * aspectRatio;
+
+        var left = -width / 2;
+        var right = width / 2;
+        var bottom = -height / 2;
+        var top = height / 2;
+
+        this.frustum(left, right, bottom, top, near, far)
+    };
+
+    Scene.prototype.frustum = function(left, right, bottom, top, near, far)
+    {
+        this.projectionMatrix = Matrix.createZeros(4);
+        this.projectionMatrix[0] = 2 * near / (right - left);
+        this.projectionMatrix[2] = (right + left) / (right - left);
+        this.projectionMatrix[5] = 2 * near / (top - bottom);
+        this.projectionMatrix[6] = (top + bottom) / (top - bottom);
+        this.projectionMatrix[10] = -(far + near) / (far - near);
+        this.projectionMatrix[11] = -2 * far * near / (far - near);
+        this.projectionMatrix[14] = -1;
+    };
+
+    Scene.prototype.orthographic = function(left, right, bottom, top, near, far)
+    {
+        this.projectionMatrix = Matrix.createZeros(4);
+        this.projectionMatrix[0] = 2 / (right - left);
+        this.projectionMatrix[3] = -((right + left) / (right - left));
+        this.projectionMatrix[5] = 2 / (top - bottom);
+        this.projectionMatrix[7] = -((top + bottom) / (top - bottom));
+        this.projectionMatrix[10] = -2 / (far - near);
+        this.projectionMatrix[11] = -((far + near) / (far - near));
+        this.projectionMatrix[15] = 1;
+    };
 
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -302,6 +586,31 @@ var AGE = AGE || (function()
         Object3D.call(this);
     }
 
+    Camera.prototype.translate = function(x, y, z)
+    {
+        x *= -1;
+        y *= -1;
+        z *= -1;
+
+        Object3D.prototype.translate.call(this, x, y, z);
+    };
+
+    Camera.prototype.translation = function(x, y, z)
+    {
+        x *= -1;
+        y *= -1;
+        z *= -1;
+
+        Object3D.prototype.translation.call(this, x, y, z);
+    };
+
+    Camera.prototype.rotate = function(angle, x, y, z)
+    {
+        angle *= -1;
+
+        Object3D.prototype.rotate.call(this, angle, x, y, z);
+    };
+
     //////////////////////////////////////////////////////////////////////////////////
 
     Model.prototype = new Object3D();
@@ -311,6 +620,13 @@ var AGE = AGE || (function()
     {
         Object3D.call(this);
     }
+
+    Model.prototype.render = function()
+    {
+        for(var i = 0; i < this.children.length; i++) {
+            this.children[i].render();
+        }
+    };
 
     Model.prototype.addMesh = function(name)
     {
@@ -330,19 +646,21 @@ var AGE = AGE || (function()
     {
         this.loaded = false;
         this.onLoad = null;
-        this.src = src;
+        this.resource = ResourceManager.newResource(src);
         this.shaderPrograms = [];
         this.textures = [];
         this.indices = null;
-        this.attributes = {};
+        this.attributes = [];
     }
 
     MeshData.prototype.load = function(callback)
     {
         var mesh = this;
 
-        getJSON(this.src, function(data)
+        this.resource.onLoad = function()
         {
+            var data = mesh.resource.getJSON();
+
             mesh.shaderPrograms = data.shaderPrograms;
 
             mesh.indices = gl.createBuffer();
@@ -353,7 +671,7 @@ var AGE = AGE || (function()
 
             for(i = 0; i < data.attributes.length; i++) {
                 var attribute = data.attributes[i];
-                mesh.attributes[attribute.name] = new Attribute(attribute.type, attribute.size, attribute.data);
+                mesh.attributes.push(new Attribute(attribute.name, attribute.type, attribute.size, attribute.data));
             }
 
             for(i = 0; i < data.textures.length; i++) {
@@ -364,7 +682,9 @@ var AGE = AGE || (function()
             mesh.loaded = true;
             if(typeof mesh.onLoad === "function") mesh.onLoad();
             if(typeof callback === "function") callback();
-        });
+        };
+
+        this.resource.load();
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -377,6 +697,28 @@ var AGE = AGE || (function()
         Object3D.call(this);
         this.data = data;
     }
+
+    Mesh.prototype.render = function()
+    {
+        var uniform = gl.getUniformLocation(getShaderProgram(), "modelMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.model));
+
+        uniform = gl.getUniformLocation(getShaderProgram(), "viewMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.view));
+
+        uniform = gl.getUniformLocation(getShaderProgram(), "projectionMatrix");
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.projection));
+
+        for(var i = 0; i < this.data.attributes.length; i++) {
+            var attribute = this.data.attributes[i];
+            var attributeLocation = gl.getAttribLocation(getShaderProgram(), attribute.name);
+            gl.enableVertexAttribArray(attributeLocation);
+            gl.bindBuffer(gl.ARRAY_BUFFER, attribute.buffer);
+            gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);
+        }
+
+        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+    };
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -440,24 +782,29 @@ var AGE = AGE || (function()
     {
         this.src = src;
         this.type = type;
-        this.file = null;
+        this.file = "";
+        this.resource = null;
         this.shader = null;
         this.loaded = false;
         this.compiled = false;
         this.onLoad = null;
+
+        if(typeof src !== "undefined") this.resource = ResourceManager.newResource(src);
     }
 
     Shader.prototype.load = function(callback)
     {
         var shader = this;
 
-        getFile(this.src, function(file)
+        this.resource.onLoad = function()
         {
-            shader.file = file;
+            shader.file = shader.resource.getFile();
             shader.loaded = true;
             if(typeof shader.onLoad === "function") shader.onLoad();
             if(typeof callback === "function") callback();
-        });
+        };
+
+        this.resource.load();
     };
 
     Shader.prototype.compile = function()
@@ -512,39 +859,6 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function getFile(src, callback)
-    {
-        if(typeof callback !== "function") return;
-
-            var xhttp = new XMLHttpRequest();
-
-        xhttp.onreadystatechange = function()
-        {
-            if (this.readyState == 4) {
-                switch(this.status) {
-                    case 200:
-                        callback(this.responseText);
-                        break;
-                }
-            }
-
-        };
-
-        xhttp.open("GET", src);
-        xhttp.send();
-    }
-
-    function getJSON(src, callback)
-    {
-        if(typeof callback !== "function") return;
-
-        getFile(src, function(file)
-        {
-            var json = JSON.parse(file);
-            callback(json);
-        })
-    }
-
     function addShaderProgram(src)
     {
         programsLoading++;
@@ -558,23 +872,34 @@ var AGE = AGE || (function()
 
         var directory = src.match(/.*\//)[0];
 
-        getJSON(src, function(file)
+        var resource = ResourceManager.newResource(src);
+
+        resource.onLoad = function()
         {
-            if(!file.hasOwnProperty("name")) return;
-            if(!file.hasOwnProperty("vertex")) return;
-            if(!file.hasOwnProperty("fragment")) return;
+            var json = resource.getJSON();
 
-            var vertShader = new VertexShader(directory + file.vertex);
-            var fragShader = new FragmentShader(directory + file.fragment);
+            if(!json.hasOwnProperty("name")) return;
+            if(!json.hasOwnProperty("vertex")) return;
+            if(!json.hasOwnProperty("fragment")) return;
 
-            shaderPrograms[file.name] = new ShaderProgram(vertShader, fragShader);
+            var vertShader = new VertexShader(directory + json.vertex);
+            var fragShader = new FragmentShader(directory + json.fragment);
+
+            if(typeof shaderPrograms[json.name] !== "undefined") {
+                ResourceManager.removeResource(shaderPrograms[json.name].vertexShader.resource);
+                ResourceManager.removeResource(shaderPrograms[json.name].fragmentShader.resource);
+            }
+
+            shaderPrograms[json.name] = new ShaderProgram(vertShader, fragShader);
 
             if(--programsLoading == 0 && typeof onProgramsLoaded === "function")
                 onProgramsLoaded();
-        });
+        };
+
+        resource.load();
     }
 
-    function compileShaderPrograms()
+    function loadShaderPrograms()
     {
         for (var name in shaderPrograms) {
             if (shaderPrograms.hasOwnProperty(name)) {
@@ -594,6 +919,21 @@ var AGE = AGE || (function()
 
     }
 
+    function setShaderProgram(name)
+    {
+        var program = shaderPrograms[name].program;
+        if(typeof program === "undefined") return false;
+
+        gl.useProgram(program);
+        currentShaderProgram = program;
+        return true;
+    }
+
+    function getShaderProgram()
+    {
+        return currentShaderProgram
+    }
+
     //////////////////////////////////////////////////////////////////////////////////
 
     return {
@@ -601,6 +941,9 @@ var AGE = AGE || (function()
         {
             gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
             if (!gl) return;
+
+            db = gl.getExtension('WEBGL_draw_buffers');
+            if (!db) return;
 
             gl.clearColor(0, 0, 0, 1);         // Clear to black, fully opaque
             gl.clearDepth(1);                  // Clear everything
@@ -611,11 +954,11 @@ var AGE = AGE || (function()
 
             if(programsLoading > 0) {
                 onProgramsLoaded = function () {
-                    compileShaderPrograms();
+                    loadShaderPrograms();
                 };
             }
 
-            else compileShaderPrograms();
+            else loadShaderPrograms();
 
             frame = new Frame();
         },
@@ -638,14 +981,21 @@ var AGE = AGE || (function()
 
             var directory = src.match(/.*\//)[0];
 
-            getJSON(src, function(file)
+            var resource = ResourceManager.newResource(src);
+
+            resource.onLoad = function()
             {
-                for(var i = 0; i < file.length; i++) {
-                    addShaderProgram(directory + file[i]);
+                var json = resource.getJSON();
+
+                for(var i = 0; i < json.length; i++) {
+                    addShaderProgram(directory + json[i]);
                 }
 
                 programsLoading--;
-            });
+
+            };
+
+            resource.load();
         },
 
         addMesh : function(name, src)
@@ -663,6 +1013,10 @@ var AGE = AGE || (function()
         setScene : function(scene)
         {
             frame.scene = scene;
+            Matrix.projection = scene.projectionMatrix;
+            Matrix.model = scene.modelMatrix;
+            Matrix.view = scene.camera.matrix;
+
             return true;
         },
 
