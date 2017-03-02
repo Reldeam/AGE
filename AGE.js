@@ -2,7 +2,6 @@ var AGE = AGE || (function()
 {
     var gl = null;
     var db = null;
-    var frame = null;
 
     var meshes = {};
     var textures = {};
@@ -364,9 +363,37 @@ var AGE = AGE || (function()
         return matrix;
     };
 
-    Matrix.model = Matrix.createIdentity(4);
     Matrix.view = Matrix.createIdentity(4);
     Matrix.projection = Matrix.createIdentity(4);
+
+    Matrix.modelStack = [Matrix.createIdentity(4)];
+
+    Matrix.model = function(matrix)
+    {
+        if(typeof matrix !== "undefined") Matrix.setModelMatrix(matrix);
+        if(Matrix.modelStack.length > 0) return Matrix.modelStack[0];
+        Matrix.modelStack = [Matrix.createIdentity(4)];
+        return Matrix.modelStack[0];
+    };
+
+    Matrix.setModelMatrix = function(matrix)
+    {
+        Matrix.modelStack = [matrix];
+    };
+
+    Matrix.pushModelMatrix = function(matrix)
+    {
+        if(Matrix.modelStack.length > 0)
+            matrix = Matrix.multiply(Matrix.modelStack[0], matrix);
+        Matrix.modelStack.unshift(matrix);
+        return matrix;
+    };
+
+    Matrix.popModelMatrix = function()
+    {
+        if(Matrix.modelStack.length > 1) Matrix.modelStack.shift();
+        return Matrix.modelStack[0];
+    };
 
     function MatrixException(message)
     {
@@ -398,10 +425,11 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function Frame()
-    {
-        this.scene = null;
-    }
+    var Frame = {
+        scene : null,
+        renderInterval : null,
+        fps : 60
+    };
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -519,16 +547,16 @@ var AGE = AGE || (function()
         this.camera = new Camera();
         this.addChild(this.camera);
 
-        this.modelMatrix = Matrix.createIdentity(4);
         this.projectionMatrix = Matrix.createIdentity(4);
-
-        this.camera.rotate(45, 1, 1, 0);
-        this.camera.translate(0, 0, 5);
     }
 
     Scene.prototype.render = function()
     {
+        if(ResourceManager.getProgress() != 1) return;
+
         setShaderProgram("phong");
+
+        Matrix.setModelMatrix(this.matrix);
 
         for(var i = 0; i < this.children.length; i++) {
             this.children[i].render();
@@ -623,9 +651,13 @@ var AGE = AGE || (function()
 
     Model.prototype.render = function()
     {
+        Matrix.pushModelMatrix(this.matrix);
+
         for(var i = 0; i < this.children.length; i++) {
             this.children[i].render();
         }
+
+        Matrix.popModelMatrix();
     };
 
     Model.prototype.addMesh = function(name)
@@ -700,8 +732,10 @@ var AGE = AGE || (function()
 
     Mesh.prototype.render = function()
     {
+        Matrix.pushModelMatrix(this.matrix);
+
         var uniform = gl.getUniformLocation(getShaderProgram(), "modelMatrix");
-        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.model));
+        gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.model()));
 
         uniform = gl.getUniformLocation(getShaderProgram(), "viewMatrix");
         gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.view));
@@ -718,6 +752,8 @@ var AGE = AGE || (function()
         }
 
         gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+
+        Matrix.popModelMatrix();
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -959,8 +995,6 @@ var AGE = AGE || (function()
             }
 
             else loadShaderPrograms();
-
-            frame = new Frame();
         },
 
         addShaderProgram : function(src)
@@ -1012,10 +1046,15 @@ var AGE = AGE || (function()
 
         setScene : function(scene)
         {
-            frame.scene = scene;
+            Frame.scene = scene;
             Matrix.projection = scene.projectionMatrix;
-            Matrix.model = scene.modelMatrix;
+            Matrix.setModelMatrix(scene.matrix);
             Matrix.view = scene.camera.matrix;
+
+            Frame.renderInterval = setInterval(function()
+            {
+                Frame.scene.render();
+            }, 1000 / Frame.fps);
 
             return true;
         },
@@ -1023,6 +1062,16 @@ var AGE = AGE || (function()
         newModel : function()
         {
             return new Model();
+        },
+
+        fps : function(number)
+        {
+            Frame.fps = number;
+            if(Frame.renderInterval) clearInterval(Frame.renderInterval);
+            Frame.renderInterval = setInterval(function()
+            {
+                Frame.scene.render();
+            }, 1000 / Frame.fps);
         }
     };
 

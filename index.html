@@ -19,18 +19,21 @@
         AGE.addMesh("cube", "meshes/cube.mesh");
 
         var model = AGE.newModel();
+
+        model.rotate(45, 1, 1, 0);
+
         var mesh = model.addMesh("cube");
+
+
 
         var scene = AGE.newScene();
         scene.perspective(45, canvas.width/canvas.height, 0.1, 100);
+        //scene.camera.rotate(45, 1, 1, 0);
+        scene.camera.translate(0, 0, 5);
+
         AGE.setScene(scene);
 
         scene.addChild(model);
-
-        setTimeout(function()
-        {
-            scene.render();
-        }, 100);
 
 
     </script>
