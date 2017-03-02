@@ -27,18 +27,30 @@ var AGE = AGE || (function()
         var rm = this;
         var resource = new Resource(src);
 
-        resource.onLoad = function()
-        {
-            rm.resourcesLoaded++;
-            if(typeof rm.onResourceLoaded === "function") rm.onResourceLoaded();
-            if(rm.resourcesLoaded == rm.resourcesTotal && typeof rm.onAllResourcesLoaded === "function")
-                rm.onAllResourcesLoaded();
-        };
-
         this.resources.push(resource);
         this.resourcesTotal++;
 
         return resource;
+    };
+
+    ResourceManager.removeResource = function(resource)
+    {
+        for(var i = 0; i < this.resources.length; i++) {
+            if(resource === this.resources[i]) {
+                if(resource.loaded) this.resourcesLoaded--;
+                this.resourcesTotal--;
+                this.resources.splice(i, 1);
+                break;
+            }
+        }
+    };
+
+    ResourceManager.resourceLoaded = function()
+    {
+        this.resourcesLoaded++;
+        if(typeof this.onResourceLoaded === "function") this.onResourceLoaded();
+        if(this.resourcesLoaded == this.resourcesTotal && typeof this.onAllResourcesLoaded === "function")
+            this.onAllResourcesLoaded();
     };
 
     ResourceManager.load = function()
@@ -70,6 +82,11 @@ var AGE = AGE || (function()
         return(matchesLoaded / matchesTotal);
     };
 
+    ResourceManager.onAllResourcesLoaded = function()
+    {
+        console.log(this);
+    };
+
     //////////////////////////////////////////////////////////////////////////////////
 
     function Resource(src)
@@ -77,7 +94,6 @@ var AGE = AGE || (function()
         var resource = this;
 
         this.src = src;
-        this.file = "";
         this.loaded = false;
         this.loading = false;
         this.bytesLoaded = 0;
@@ -93,9 +109,10 @@ var AGE = AGE || (function()
                 case 4:
                     switch(this.status) {
                         case 200:
+
                             resource.loaded = true;
                             resource.loading = false;
-                            resource.file = this.responseText;
+                            ResourceManager.resourceLoaded();
                             if(typeof resource.onLoad === "function") resource.onLoad();
                             break;
                     }
@@ -126,16 +143,15 @@ var AGE = AGE || (function()
 
     Resource.prototype.getJSON = function()
     {
-        return(JSON.parse(this.file));
+        if(this.loaded) return JSON.parse(this.request.responseText);
+        return null;
     };
 
     Resource.prototype.getFile = function()
     {
-        return(this.file);
+        if(this.loaded) return this.request.responseText;
+        return "";
     };
-
-    var myResource = new Resource("shaders/shaders.library");
-    myResource.load();
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -476,7 +492,7 @@ var AGE = AGE || (function()
     {
         this.loaded = false;
         this.onLoad = null;
-        this.src = src;
+        this.resource = ResourceManager.newResource(src);
         this.shaderPrograms = [];
         this.textures = [];
         this.indices = null;
@@ -487,8 +503,11 @@ var AGE = AGE || (function()
     {
         var mesh = this;
 
-        getJSON(this.src, function(data)
+        this.resource.load();
+        this.resource.onLoad = function()
         {
+            var data = mesh.resource.getJSON();
+
             mesh.shaderPrograms = data.shaderPrograms;
 
             mesh.indices = gl.createBuffer();
@@ -510,7 +529,7 @@ var AGE = AGE || (function()
             mesh.loaded = true;
             if(typeof mesh.onLoad === "function") mesh.onLoad();
             if(typeof callback === "function") callback();
-        });
+        };
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -596,24 +615,29 @@ var AGE = AGE || (function()
     {
         this.src = src;
         this.type = type;
-        this.file = null;
+        this.file = "";
+        this.resource = null;
         this.shader = null;
         this.loaded = false;
         this.compiled = false;
         this.onLoad = null;
+
+        if(typeof src !== "undefined") this.resource = ResourceManager.newResource(src);
     }
 
     Shader.prototype.load = function(callback)
     {
         var shader = this;
 
-        getFile(this.src, function(file)
+        this.resource.onLoad = function()
         {
-            shader.file = file;
+            shader.file = shader.resource.getFile();
             shader.loaded = true;
             if(typeof shader.onLoad === "function") shader.onLoad();
             if(typeof callback === "function") callback();
-        });
+        };
+
+        this.resource.load();
     };
 
     Shader.prototype.compile = function()
@@ -668,39 +692,6 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function getFile(src, callback)
-    {
-        if(typeof callback !== "function") return;
-
-            var xhttp = new XMLHttpRequest();
-
-        xhttp.onreadystatechange = function()
-        {
-            if (this.readyState == 4) {
-                switch(this.status) {
-                    case 200:
-                        callback(this.responseText);
-                        break;
-                }
-            }
-
-        };
-
-        xhttp.open("GET", src);
-        xhttp.send();
-    }
-
-    function getJSON(src, callback)
-    {
-        if(typeof callback !== "function") return;
-
-        getFile(src, function(file)
-        {
-            var json = JSON.parse(file);
-            callback(json);
-        })
-    }
-
     function addShaderProgram(src)
     {
         programsLoading++;
@@ -714,23 +705,34 @@ var AGE = AGE || (function()
 
         var directory = src.match(/.*\//)[0];
 
-        getJSON(src, function(file)
+        var resource = ResourceManager.newResource(src);
+
+        resource.onLoad = function()
         {
-            if(!file.hasOwnProperty("name")) return;
-            if(!file.hasOwnProperty("vertex")) return;
-            if(!file.hasOwnProperty("fragment")) return;
+            var json = resource.getJSON();
 
-            var vertShader = new VertexShader(directory + file.vertex);
-            var fragShader = new FragmentShader(directory + file.fragment);
+            if(!json.hasOwnProperty("name")) return;
+            if(!json.hasOwnProperty("vertex")) return;
+            if(!json.hasOwnProperty("fragment")) return;
 
-            shaderPrograms[file.name] = new ShaderProgram(vertShader, fragShader);
+            var vertShader = new VertexShader(directory + json.vertex);
+            var fragShader = new FragmentShader(directory + json.fragment);
+
+            if(typeof shaderPrograms[json.name] !== "undefined") {
+                ResourceManager.removeResource(shaderPrograms[json.name].vertexShader.resource);
+                ResourceManager.removeResource(shaderPrograms[json.name].fragmentShader.resource);
+            }
+
+            shaderPrograms[json.name] = new ShaderProgram(vertShader, fragShader);
 
             if(--programsLoading == 0 && typeof onProgramsLoaded === "function")
                 onProgramsLoaded();
-        });
+        };
+
+        resource.load();
     }
 
-    function compileShaderPrograms()
+    function loadShaderPrograms()
     {
         for (var name in shaderPrograms) {
             if (shaderPrograms.hasOwnProperty(name)) {
@@ -785,11 +787,11 @@ var AGE = AGE || (function()
 
             if(programsLoading > 0) {
                 onProgramsLoaded = function () {
-                    compileShaderPrograms();
+                    loadShaderPrograms();
                 };
             }
 
-            else compileShaderPrograms();
+            else loadShaderPrograms();
 
             frame = new Frame();
         },
@@ -812,14 +814,21 @@ var AGE = AGE || (function()
 
             var directory = src.match(/.*\//)[0];
 
-            getJSON(src, function(file)
+            var resource = ResourceManager.newResource(src);
+
+            resource.onLoad = function()
             {
-                for(var i = 0; i < file.length; i++) {
-                    addShaderProgram(directory + file[i]);
+                var json = resource.getJSON();
+
+                for(var i = 0; i < json.length; i++) {
+                    addShaderProgram(directory + json[i]);
                 }
 
                 programsLoading--;
-            });
+
+            };
+
+            resource.load();
         },
 
         addMesh : function(name, src)
