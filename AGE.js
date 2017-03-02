@@ -3,8 +3,6 @@ var AGE = AGE || (function()
     var gl = null;
     var frame = null;
 
-    var scenes = {};
-    var models = {};
     var meshes = {};
     var textures = {};
 
@@ -257,7 +255,10 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function Frame() {}
+    function Frame()
+    {
+        this.scene = null;
+    }
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -270,6 +271,7 @@ var AGE = AGE || (function()
         this.yScale = 1;
         this.zScale = 1;
         this.matrix = Matrix.createIdentity(4);
+        this.children = [];
     }
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -282,7 +284,10 @@ var AGE = AGE || (function()
         Object3D.call(this);
     }
 
-    Scene.prototype.addModel = function(name) {};
+    Scene.prototype.addModel = function(model)
+    {
+        this.children.push(model);
+    };
 
     Scene.prototype.removeModel = function(model) {};
 
@@ -307,18 +312,22 @@ var AGE = AGE || (function()
         Object3D.call(this);
     }
 
-    Model.prototype.addMesh = function(name) {};
+    Model.prototype.addMesh = function(name)
+    {
+        var meshData = meshes[name];
+        if(typeof meshData === "undefined") return null;
+
+        var mesh = new Mesh(meshData);
+        this.children.push(mesh);
+        return mesh;
+    };
 
     Model.prototype.removeMesh = function(mesh) {};
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    Mesh.prototype = new Object3D();
-    Mesh.prototype.constructor = Mesh;
-
-    function Mesh(src)
+    function MeshData(src)
     {
-        Object3D.call(this);
         this.loaded = false;
         this.onLoad = null;
         this.src = src;
@@ -328,7 +337,7 @@ var AGE = AGE || (function()
         this.attributes = {};
     }
 
-    Mesh.prototype.load = function(callback)
+    MeshData.prototype.load = function(callback)
     {
         var mesh = this;
 
@@ -357,6 +366,17 @@ var AGE = AGE || (function()
             if(typeof callback === "function") callback();
         });
     };
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    Mesh.prototype = new Object3D();
+    Mesh.prototype.constructor = Mesh;
+
+    function Mesh(data)
+    {
+        Object3D.call(this);
+        this.data = data;
+    }
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -597,6 +617,7 @@ var AGE = AGE || (function()
 
             else compileShaderPrograms();
 
+            frame = new Frame();
         },
 
         addShaderProgram : function(src)
@@ -629,21 +650,26 @@ var AGE = AGE || (function()
 
         addMesh : function(name, src)
         {
-            var mesh = new Mesh(src);
+            var mesh = new MeshData(src);
             meshes[name] = mesh;
-            mesh.load(function()
-            {
-                console.log(mesh);
-                console.log(meshes);
-            });
-            console.log(meshes);
+            mesh.load();
         },
 
-        newScene : function(name) {},
+        newScene : function()
+        {
+            return new Scene();
+        },
 
-        setScene : function(name) {},
+        setScene : function(scene)
+        {
+            frame.scene = scene;
+            return true;
+        },
 
-        newModel : function(name) {}
+        newModel : function()
+        {
+            return new Model();
+        }
     };
 
     //////////////////////////////////////////////////////////////////////////////////
