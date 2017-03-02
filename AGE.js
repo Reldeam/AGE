@@ -1,14 +1,141 @@
 var AGE = AGE || (function()
 {
     var gl = null;
+    var db = null;
     var frame = null;
 
     var meshes = {};
     var textures = {};
 
     var shaderPrograms = {};
+    var currentShaderProgram = null;
     var programsLoading = 0;
     var onProgramsLoaded = null;
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    var ResourceManager = {
+        resources : [],
+        resourcesLoaded : 0,
+        resourcesTotal : 0,
+        onResourceLoaded : null,
+        onAllResourcesLoaded : null
+    };
+
+    ResourceManager.newResource = function(src)
+    {
+        var rm = this;
+        var resource = new Resource(src);
+
+        resource.onLoad = function()
+        {
+            rm.resourcesLoaded++;
+            if(typeof rm.onResourceLoaded === "function") rm.onResourceLoaded();
+            if(rm.resourcesLoaded == rm.resourcesTotal && typeof rm.onAllResourcesLoaded === "function")
+                rm.onAllResourcesLoaded();
+        };
+
+        this.resources.push(resource);
+        this.resourcesTotal++;
+
+        return resource;
+    };
+
+    ResourceManager.load = function()
+    {
+        for(var i = 0; i < this.resources.length; i++) {
+            if(!this.resources[i].loaded && !this.resources[i].loading)
+                this.resources[i].load();
+        }
+    };
+
+    ResourceManager.getProgress = function(match)
+    {
+        if(typeof match === "undefined") {
+            if(this.resourcesTotal == 0) return 0;
+            return(this.resourcesLoaded / this.resourcesTotal);
+        }
+
+        var matchesLoaded = 0;
+        var matchesTotal = 0;
+
+        for(var i = 0; i < this.resources.length; i++) {
+            if(this.resources[i].src.match(/match$/).length > 0) {
+                matchesTotal++;
+                if(this.resources[i].loaded == true) matchesLoaded++;
+            }
+        }
+
+        if(matchesTotal == 0) return 0;
+        return(matchesLoaded / matchesTotal);
+    };
+
+    //////////////////////////////////////////////////////////////////////////////////
+
+    function Resource(src)
+    {
+        var resource = this;
+
+        this.src = src;
+        this.file = "";
+        this.loaded = false;
+        this.loading = false;
+        this.bytesLoaded = 0;
+        this.bytesTotal = 0;
+        this.onLoad = null;
+        this.onProgress = null;
+
+        this.request = new XMLHttpRequest();
+
+        this.request.onreadystatechange = function(event)
+        {
+            switch(this.readyState) {
+                case 4:
+                    switch(this.status) {
+                        case 200:
+                            resource.loaded = true;
+                            resource.loading = false;
+                            resource.file = this.responseText;
+                            if(typeof resource.onLoad === "function") resource.onLoad();
+                            break;
+                    }
+                    break;
+            }
+        };
+
+        this.request.onprogress = function(event)
+        {
+            resource.bytesLoaded = event.loaded;
+            resource.bytesTotal = event.total;
+            if(typeof resource.onProgress === "function") resource.onProgress();
+        };
+    }
+
+    Resource.prototype.load = function()
+    {
+        this.loading = true;
+        this.request.open("GET", this.src);
+        this.request.send();
+    };
+
+    Resource.prototype.getProgress = function()
+    {
+        if(bytesTotal == 0) return(0);
+        return(bytesLoaded / bytesTotal);
+    };
+
+    Resource.prototype.getJSON = function()
+    {
+        return(JSON.parse(this.file));
+    };
+
+    Resource.prototype.getFile = function()
+    {
+        return(this.file);
+    };
+
+    var myResource = new Resource("shaders/shaders.library");
+    myResource.load();
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -234,8 +361,9 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function Attribute(type, size, data)
+    function Attribute(name, type, size, data)
     {
+        this.name = name;
         this.size = size;
 
         switch(type) {
@@ -274,6 +402,8 @@ var AGE = AGE || (function()
         this.children = [];
     }
 
+    Object3D.prototype.render = function() {};
+
     //////////////////////////////////////////////////////////////////////////////////
 
     Scene.prototype = new Object3D();
@@ -283,6 +413,15 @@ var AGE = AGE || (function()
     {
         Object3D.call(this);
     }
+
+    Scene.prototype.render = function()
+    {
+        setShaderProgram("phong");
+
+        for(var i = 0; i < this.children.length; i++) {
+            this.children[i].render();
+        }
+    };
 
     Scene.prototype.addModel = function(model)
     {
@@ -312,6 +451,13 @@ var AGE = AGE || (function()
         Object3D.call(this);
     }
 
+    Model.prototype.render = function()
+    {
+        for(var i = 0; i < this.children.length; i++) {
+            this.children[i].render();
+        }
+    };
+
     Model.prototype.addMesh = function(name)
     {
         var meshData = meshes[name];
@@ -334,7 +480,7 @@ var AGE = AGE || (function()
         this.shaderPrograms = [];
         this.textures = [];
         this.indices = null;
-        this.attributes = {};
+        this.attributes = [];
     }
 
     MeshData.prototype.load = function(callback)
@@ -353,7 +499,7 @@ var AGE = AGE || (function()
 
             for(i = 0; i < data.attributes.length; i++) {
                 var attribute = data.attributes[i];
-                mesh.attributes[attribute.name] = new Attribute(attribute.type, attribute.size, attribute.data);
+                mesh.attributes.push(new Attribute(attribute.name, attribute.type, attribute.size, attribute.data));
             }
 
             for(i = 0; i < data.textures.length; i++) {
@@ -377,6 +523,16 @@ var AGE = AGE || (function()
         Object3D.call(this);
         this.data = data;
     }
+
+    Mesh.prototype.render = function()
+    {
+        for(var i = 0; i < this.data.attributes.length; i++) {
+            var attribute = this.data.attributes[i];
+            var attributeLocation = gl.getAttribLocation(getShaderProgram(), attribute.name);
+            gl.bindBuffer(gl.ARRAY_BUFFER, attribute.buffer);
+            gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);
+        }
+    };
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -594,6 +750,21 @@ var AGE = AGE || (function()
 
     }
 
+    function setShaderProgram(name)
+    {
+        var program = shaderPrograms[name].program;
+        if(typeof program === "undefined") return false;
+
+        gl.useProgram(program);
+        currentShaderProgram = program;
+        return true;
+    }
+
+    function getShaderProgram()
+    {
+        return currentShaderProgram
+    }
+
     //////////////////////////////////////////////////////////////////////////////////
 
     return {
@@ -601,6 +772,9 @@ var AGE = AGE || (function()
         {
             gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
             if (!gl) return;
+
+            db = gl.getExtension('WEBGL_draw_buffers');
+            if (!db) return;
 
             gl.clearColor(0, 0, 0, 1);         // Clear to black, fully opaque
             gl.clearDepth(1);                  // Clear everything
