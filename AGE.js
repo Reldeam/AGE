@@ -426,11 +426,26 @@ var AGE = AGE || (function()
     //////////////////////////////////////////////////////////////////////////////////
 
     var Frame = {
+        DIAGNOSTIC_REFRESH_RATE : 100,
         scene : null,
         renderInterval : null,
-        fps : 60,
+        maxFPS : 60,
+        averageFPS : 60,
+        dt : 0,
+        date : new Date(),
+        renderCount : 0,
         update : null
     };
+
+    Frame.diagnostic = setInterval(function()
+    {
+        var date = new Date();
+        Frame.dt = date.getTime() - Frame.date.getTime();
+        Frame.date = date;
+        if(Frame.dt < 1) Frame.dt = 1;
+        Frame.averageFPS = (Frame.averageFPS + (Frame.renderCount/(Frame.dt/1000))) / 2;
+        Frame.renderCount = 0;
+    }, Frame.DIAGNOSTIC_REFRESH_RATE);
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -532,7 +547,7 @@ var AGE = AGE || (function()
         r[9] = uy * uz * (1 - Math.cos(angle)) + ux * Math.sin(angle);
         r[10] = Math.cos(angle) + Math.pow(uz, 2) * (1 - Math.cos(angle));
 
-        this.matrix = Matrix.multiply(r, this.matrix);
+        this.matrix = Matrix.multiply(this.matrix, r);
     };
 
     Object3D.prototype.render = function() {};
@@ -553,9 +568,11 @@ var AGE = AGE || (function()
 
     Scene.prototype.render = function()
     {
-        if(Frame.update !== "null") Frame.update();
-
         if(ResourceManager.getProgress() != 1) return;
+
+        if(typeof Frame.update === "function") Frame.update();
+
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         setShaderProgram("phong");
 
@@ -564,6 +581,8 @@ var AGE = AGE || (function()
         for(var i = 0; i < this.children.length; i++) {
             this.children[i].render();
         }
+
+        Frame.renderCount++;
     };
 
     Scene.prototype.perspective = function(fieldOfView, aspectRatio, near, far)
@@ -682,7 +701,7 @@ var AGE = AGE || (function()
         this.onLoad = null;
         this.resource = ResourceManager.newResource(src);
         this.shaderPrograms = [];
-        this.textures = [];
+        this.texture = null;
         this.indices = 0;
         this.indexBuffer = null;
         this.attributes = [];
@@ -710,9 +729,12 @@ var AGE = AGE || (function()
                 mesh.attributes.push(new Attribute(attribute.name, attribute.type, attribute.size, attribute.data));
             }
 
-            for(i = 0; i < data.textures.length; i++) {
-                mesh.textures.push(data.textures[i].name);
-                addTexture(data.textures[i].name, data.textures[i].src);
+            if(typeof textures[data.texture.name] !== "undefined")
+                mesh.texture = textures[data.texture.name];
+            else {
+                var texture = new Texture(data.texture.src);
+                textures[data.texture.name] = texture;
+                mesh.texture = texture;
             }
 
             mesh.loaded = true;
@@ -756,6 +778,10 @@ var AGE = AGE || (function()
             gl.bindBuffer(gl.ARRAY_BUFFER, attribute.buffer);
             gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);
         }
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.data.texture.texture);
+        gl.uniform1i(gl.getUniformLocation(getShaderProgram(), "uSampler"), 0);
 
         gl.drawElements(gl.TRIANGLES, this.data.indices, gl.UNSIGNED_SHORT, 0);
 
@@ -897,7 +923,26 @@ var AGE = AGE || (function()
 
     //////////////////////////////////////////////////////////////////////////////////
 
-    function Texture() {}
+    function Texture(src)
+    {
+        var texture = this;
+
+        this.texture = gl.createTexture();
+        this.image = new Image();
+        this.image.onload = function()
+        {
+            gl.bindTexture(gl.TEXTURE_2D, texture.texture);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+
+            gl.generateMipmap(gl.TEXTURE_2D);
+
+            gl.bindTexture(gl.TEXTURE_2D, null);
+        };
+        this.image.src = src;
+    }
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -981,6 +1026,7 @@ var AGE = AGE || (function()
     return {
         bootstrap : function(canvas)
         {
+
             gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
             if (!gl) return;
 
@@ -1057,10 +1103,12 @@ var AGE = AGE || (function()
             Matrix.setModelMatrix(scene.matrix);
             Matrix.view = scene.camera.matrix;
 
+            if(typeof Frame.renderInterval !== "null") clearInterval(Frame.renderInterval);
+
             Frame.renderInterval = setInterval(function()
             {
                 Frame.scene.render();
-            }, 1000 / Frame.fps);
+            }, 1000 / Frame.maxFPS);
 
             return true;
         },
@@ -1072,12 +1120,12 @@ var AGE = AGE || (function()
 
         fps : function(number)
         {
-            Frame.fps = number;
-            if(Frame.renderInterval) clearInterval(Frame.renderInterval);
+            Frame.maxFPS = number;
+            if(typeof Frame.renderInterval !== "null") clearInterval(Frame.renderInterval);
             Frame.renderInterval = setInterval(function()
             {
                 Frame.scene.render();
-            }, 1000 / Frame.fps);
+            }, 1000 / Frame.maxFPS);
         },
 
         update : function(method)

@@ -10,35 +10,40 @@
     <canvas id="canvas3D" width="600px" height="400px"></canvas>
 
     <script>
-
         var canvas = document.getElementById("canvas3D");
 
         AGE.addShaderLibrary("shaders");
+
         AGE.bootstrap(canvas);
 
         AGE.addMesh("cube", "meshes/cube.mesh");
 
         var model = AGE.newModel();
+        var model2 = AGE.newModel();
 
-        model.rotate(45, 1, 1, 0);
-
-        var mesh = model.addMesh("cube");
+        model.addMesh("cube");
+        model2.addMesh("cube");
 
         var scene = AGE.newScene();
-        scene.perspective(45, canvas.width/canvas.height, 0.1, 10);
-        //scene.camera.rotate(45, 1, 1, 0);
+
+        scene.perspective(45, canvas.width/canvas.height, 0.1, 100);
         scene.camera.translate(0, 0, 5);
 
         AGE.setScene(scene);
 
         scene.addChild(model);
+        scene.addChild(model2);
+
+        model.translate(1.5, 0, 0);
+        model2.translate(-1.5, 0, 0);
+
+        AGE.fps(60);
 
         AGE.update(function()
         {
             model.rotate(1, 1, 1, 0);
+            scene.rotate(1, 0, 1, 0);
         });
-
-
     </script>
 
 </body>
