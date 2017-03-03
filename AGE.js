@@ -428,7 +428,8 @@ var AGE = AGE || (function()
     var Frame = {
         scene : null,
         renderInterval : null,
-        fps : 60
+        fps : 60,
+        update : null
     };
 
     //////////////////////////////////////////////////////////////////////////////////
@@ -552,6 +553,8 @@ var AGE = AGE || (function()
 
     Scene.prototype.render = function()
     {
+        if(Frame.update !== "null") Frame.update();
+
         if(ResourceManager.getProgress() != 1) return;
 
         setShaderProgram("phong");
@@ -602,7 +605,6 @@ var AGE = AGE || (function()
         this.projectionMatrix[11] = -((far + near) / (far - near));
         this.projectionMatrix[15] = 1;
     };
-
 
     //////////////////////////////////////////////////////////////////////////////////
 
@@ -681,7 +683,8 @@ var AGE = AGE || (function()
         this.resource = ResourceManager.newResource(src);
         this.shaderPrograms = [];
         this.textures = [];
-        this.indices = null;
+        this.indices = 0;
+        this.indexBuffer = null;
         this.attributes = [];
     }
 
@@ -695,8 +698,9 @@ var AGE = AGE || (function()
 
             mesh.shaderPrograms = data.shaderPrograms;
 
-            mesh.indices = gl.createBuffer();
-            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indices);
+            mesh.indices = data.indices.length;
+            mesh.indexBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
             gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(data.indices), gl.STATIC_DRAW);
 
             var i;
@@ -743,6 +747,8 @@ var AGE = AGE || (function()
         uniform = gl.getUniformLocation(getShaderProgram(), "projectionMatrix");
         gl.uniformMatrix4fv(uniform, false, new Float32Array(Matrix.projection));
 
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.data.indexBuffer);
+
         for(var i = 0; i < this.data.attributes.length; i++) {
             var attribute = this.data.attributes[i];
             var attributeLocation = gl.getAttribLocation(getShaderProgram(), attribute.name);
@@ -751,7 +757,7 @@ var AGE = AGE || (function()
             gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);
         }
 
-        gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0);
+        gl.drawElements(gl.TRIANGLES, this.data.indices, gl.UNSIGNED_SHORT, 0);
 
         Matrix.popModelMatrix();
     };
@@ -1072,6 +1078,11 @@ var AGE = AGE || (function()
             {
                 Frame.scene.render();
             }, 1000 / Frame.fps);
+        },
+
+        update : function(method)
+        {
+            Frame.update = method;
         }
     };
 

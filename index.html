@@ -7,7 +7,7 @@
     </head>
 <body>
 
-    <canvas id="canvas3D"></canvas>
+    <canvas id="canvas3D" width="600px" height="400px"></canvas>
 
     <script>
 
@@ -24,16 +24,19 @@
 
         var mesh = model.addMesh("cube");
 
-
-
         var scene = AGE.newScene();
-        scene.perspective(45, canvas.width/canvas.height, 0.1, 100);
+        scene.perspective(45, canvas.width/canvas.height, 0.1, 10);
         //scene.camera.rotate(45, 1, 1, 0);
         scene.camera.translate(0, 0, 5);
 
         AGE.setScene(scene);
 
         scene.addChild(model);
+
+        AGE.update(function()
+        {
+            model.rotate(1, 1, 1, 0);
+        });
 
 
     </script>
