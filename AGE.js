@@ -574,7 +574,7 @@ var AGE = AGE || (function()
 
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-        setShaderProgram("phong");
+        setShaderProgram("depth");
 
         Matrix.setModelMatrix(this.matrix);
 
@@ -774,6 +774,7 @@ var AGE = AGE || (function()
         for(var i = 0; i < this.data.attributes.length; i++) {
             var attribute = this.data.attributes[i];
             var attributeLocation = gl.getAttribLocation(getShaderProgram(), attribute.name);
+            if(attributeLocation == -1) continue;
             gl.enableVertexAttribArray(attributeLocation);
             gl.bindBuffer(gl.ARRAY_BUFFER, attribute.buffer);
             gl.vertexAttribPointer(attributeLocation, attribute.size, gl.FLOAT, false, 0, 0);

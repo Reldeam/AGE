@@ -1,0 +1,6 @@
+{
+  "name" : "depth",
+  "vertex" : "depth.vert",
+  "fragment" : "depth.frag",
+  "attributes" : ["vertices"]
+}
