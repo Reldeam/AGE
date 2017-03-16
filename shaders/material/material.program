@@ -1,0 +1,6 @@
+{
+  "name" : "material",
+  "vertex" : "material.vert",
+  "fragment" : "material.frag",
+  "attributes" : ["vertices", "normals", "colours", "uvs"]
+}

@@ -1,1 +1,1 @@
-["phong", "depth"]
+["depth", "material", "geometry"]

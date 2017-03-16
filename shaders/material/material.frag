@@ -12,10 +12,10 @@ void main(void)
     //gl_FragColor = texture2D(uSampler, vec2(uv.s, uv.t));
     //gl_FragColor = colour;
 
-    highp vec4 encode = position.z * vec4(1.0, 255.0, 65025.0, 160581375.0);
-    encode = fract(encode);
+    //highp vec4 encode = position.z * vec4(1.0, 255.0, 65025.0, 160581375.0);
+    //encode = fract(encode);
 
-    encode -= encode.yzww * vec4(1.0/255.0,1.0/255.0,1.0/255.0,0.0);
-    encode[3] = 1.0;
-    gl_FragColor = encode;
+    //encode -= encode.yzww * vec4(1.0/255.0,1.0/255.0,1.0/255.0,0.0);
+    //encode[3] = 1.0;
+    gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
 }
